@@ -129,6 +129,8 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
 .venv
 env/
 venv/
@@ -194,3 +196,14 @@ cython_debug/
 .cursorindexingignore
 
 hosting/
+
+# GitContainer Cloud: never commit credentials, local clones or build output
+*.key
+*.pem
+service-account*.json
+*credentials*.json
+repos/
+*.log
+
+# Local IDE / agent state
+.qodo/

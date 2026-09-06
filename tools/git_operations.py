@@ -1,8 +1,13 @@
 import asyncio
 import os
+import re
 import shutil
 from urllib.parse import urlparse
 from typing import Dict, Any
+
+# Owner/repo segments come from user-supplied URLs: allowlist them so they
+# can never break out into shell metacharacters or path separators.
+_SAFE_SEGMENT_RE = re.compile(r'^[A-Za-z0-9_.-]+$')
 
 
 async def clone_repo_tool(github_url: str, target_dir: str = "repos") -> Dict[str, Any]:
@@ -38,23 +43,29 @@ async def clone_repo_tool(github_url: str, target_dir: str = "repos") -> Dict[st
         owner, repo_name = path_parts[0], path_parts[1]
         if repo_name.endswith('.git'):
             repo_name = repo_name[:-4]
-        
+
+        if not _SAFE_SEGMENT_RE.match(owner) or not _SAFE_SEGMENT_RE.match(repo_name):
+            return {
+                "success": False,
+                "error": "Invalid GitHub repository owner or name",
+                "url": github_url
+            }
+
         # Create target directory if it doesn't exist
         os.makedirs(target_dir, exist_ok=True)
-        
+
         # Full local path for the cloned repository
         local_path = os.path.join(target_dir, f"{owner}_{repo_name}")
-        
+
         # Remove existing directory if it exists
         if os.path.exists(local_path):
             shutil.rmtree(local_path)
-        
-        # Clone the repository using git command
-        clone_command = f"git clone {github_url} {local_path}"
-        
-        # Run the git clone command
-        process = await asyncio.create_subprocess_shell(
-            clone_command,
+
+        # Clone the repository without a shell: argument array only, so the
+        # user-supplied URL can never be interpreted as shell commands.
+        # Works identically on Windows (PowerShell/cmd) and Unix.
+        process = await asyncio.create_subprocess_exec(
+            "git", "clone", github_url, local_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )

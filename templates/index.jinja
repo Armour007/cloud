@@ -367,6 +367,26 @@
                 </div>
                 {% endif %}
 
+                <!-- Cloud deployment (same visual language as the rest of the page) -->
+                <div id="static-deploy-slot"></div>
+                <script>
+                    (function() {
+                        window.__gcResult = {
+                            repo_url: {{ repo_url | tojson }},
+                            dockerfile: '',
+                            project_name: {{ result.project_name | tojson }},
+                            technology_stack: {{ result.technology_stack | tojson }},
+                            port_recommendations: [],
+                            session_id: ''
+                        };
+                        var slot = document.getElementById('static-deploy-slot');
+                        if (slot && typeof generateDeployHTML === 'function') {
+                            slot.innerHTML = generateDeployHTML('static-');
+                            if (typeof refreshDeployHint === 'function') refreshDeployHint('static-');
+                        }
+                    })();
+                </script>
+
             </div>
         </div>
         {% endif %}
@@ -602,6 +622,222 @@
             copyToClipboard(content, 'Compose file copied!', button);
         }
 
+        // Currently displayed generation result (set by streaming showResults
+        // or by the server-rendered results block). Used for cloud deployment.
+        window.__gcResult = window.__gcResult || null;
+
+        function escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        // Cloud deploy card HTML. Reuses the existing GitContainer visual
+        // language (same cards, borders, hard shadows, buttons, step boxes).
+        // `prefix` namespaces element ids ('static-' for server-rendered
+        // results, '' for streaming results).
+        function generateDeployHTML(prefix) {
+            prefix = prefix || '';
+            let html = '<div>';
+            html += '<div class="flex justify-between items-center mb-4">';
+            html += '<h3 class="text-xl font-bold text-gray-900">Deploy to Google Cloud Run</h3>';
+            html += '</div>';
+            html += '<div class="bg-[#E6F2FF] border-[3px] border-gray-900 rounded p-4">';
+            html += '<p class="text-sm text-gray-700 mb-2">Build this Dockerfile, push it to Google Artifact Registry and deploy it to Cloud Run for a live HTTPS URL.</p>';
+            html += '<p id="' + prefix + 'deploy-config-hint" class="text-sm text-gray-600 mb-4">Checking cloud configuration...</p>';
+            html += '<div class="relative group inline-block">';
+            html += '<div class="w-full h-full rounded bg-gray-900 translate-y-1 translate-x-1 absolute inset-0"></div>';
+            html += '<button id="' + prefix + 'deploy-btn" onclick="deployToCloud(\'' + prefix + '\')" class="px-4 py-2 bg-[#5A9BF5] border-[3px] border-gray-900 text-gray-900 rounded group-hover:-translate-y-px group-hover:-translate-x-px transition-transform relative z-10 flex items-center gap-2">';
+            html += 'Deploy to Cloud Run';
+            html += '</button>';
+            html += '</div>';
+            html += '<div id="' + prefix + 'deploy-progress" class="hidden mt-4 space-y-4">';
+            html += '<p id="' + prefix + 'deploy-status" class="text-lg text-gray-600">Preparing...</p>';
+            html += '<div class="grid grid-cols-1 md:grid-cols-3 gap-4">';
+            html += '<div id="' + prefix + 'deploy-step-build" class="bg-[#E6F2FF] border-[3px] border-gray-300 rounded p-4 transition-all duration-300"><div class="flex items-center"><div class="w-8 h-8 rounded-full border-[3px] border-gray-300 flex items-center justify-center mr-3"><span class="text-sm font-bold">1</span></div><span class="font-medium">Build Image</span></div></div>';
+            html += '<div id="' + prefix + 'deploy-step-push" class="bg-[#E6F2FF] border-[3px] border-gray-300 rounded p-4 transition-all duration-300"><div class="flex items-center"><div class="w-8 h-8 rounded-full border-[3px] border-gray-300 flex items-center justify-center mr-3"><span class="text-sm font-bold">2</span></div><span class="font-medium">Push to Registry</span></div></div>';
+            html += '<div id="' + prefix + 'deploy-step-deploy" class="bg-[#E6F2FF] border-[3px] border-gray-300 rounded p-4 transition-all duration-300"><div class="flex items-center"><div class="w-8 h-8 rounded-full border-[3px] border-gray-300 flex items-center justify-center mr-3"><span class="text-sm font-bold">3</span></div><span class="font-medium">Deploy to Cloud Run</span></div></div>';
+            html += '</div>';
+            html += '<div id="' + prefix + 'deploy-logs" class="bg-white border-[2px] border-gray-300 rounded p-4 font-mono text-sm max-h-[300px] overflow-y-auto whitespace-pre-wrap"></div>';
+            html += '</div>';
+            html += '<div id="' + prefix + 'deploy-result" class="hidden mt-4"></div>';
+            html += '</div>';
+            html += '</div>';
+            return html;
+        }
+
+        function highlightDeployStep(prefix, step) {
+            const stepElement = document.getElementById(prefix + 'deploy-step-' + step);
+            if (stepElement) {
+                stepElement.className = stepElement.className.replace('border-gray-300', 'border-yellow-500 bg-yellow-50');
+            }
+        }
+
+        function completeDeployStep(prefix, step) {
+            const stepElement = document.getElementById(prefix + 'deploy-step-' + step);
+            if (stepElement) {
+                stepElement.className = stepElement.className.replace('border-gray-300', 'border-green-500 bg-green-50');
+                stepElement.className = stepElement.className.replace('border-yellow-500 bg-yellow-50', 'border-green-500 bg-green-50');
+            }
+        }
+
+        function appendDeployLog(prefix, line) {
+            const logsEl = document.getElementById(prefix + 'deploy-logs');
+            if (!logsEl) return;
+            logsEl.textContent += (logsEl.textContent ? '\n' : '') + line;
+            logsEl.scrollTop = logsEl.scrollHeight;
+        }
+
+        function showDeployError(prefix, message) {
+            const resultEl = document.getElementById(prefix + 'deploy-result');
+            if (!resultEl) return;
+            resultEl.classList.remove('hidden');
+            resultEl.innerHTML = '<div class="p-4 bg-red-50 border-[3px] border-red-500 rounded-lg text-red-700">'
+                + '<p class="font-bold mb-1">Cloud deployment failed</p>'
+                + '<p class="text-sm whitespace-pre-wrap">' + escapeHtml(message) + '</p>'
+                + '</div>';
+        }
+
+        function showDeploySuccess(prefix, result) {
+            completeDeployStep(prefix, 'build');
+            completeDeployStep(prefix, 'push');
+            completeDeployStep(prefix, 'deploy');
+            const statusEl = document.getElementById(prefix + 'deploy-status');
+            if (statusEl) statusEl.textContent = 'Deployment successful — LIVE';
+            const resultEl = document.getElementById(prefix + 'deploy-result');
+            if (!resultEl) return;
+            resultEl.classList.remove('hidden');
+            const url = result.url || '';
+            let html = '<div class="p-4 bg-green-50 border-[3px] border-green-500 rounded-lg text-green-700">';
+            html += '<p class="font-bold mb-1">Deployment successful — LIVE</p>';
+            html += '<a href="' + escapeHtml(url) + '" target="_blank" class="underline break-all text-sm">' + escapeHtml(url) + '</a>';
+            html += '<p class="text-sm mt-2">Service: ' + escapeHtml(result.service || '') + ' · Region: ' + escapeHtml(result.region || '') + ' · Port: ' + escapeHtml(result.container_port || '') + '</p>';
+            html += '<div class="flex flex-wrap gap-2 mt-3">';
+            html += '<div class="relative group"><div class="w-full h-full rounded bg-gray-900 translate-y-1 translate-x-1 absolute inset-0"></div>';
+            html += '<a href="' + escapeHtml(url) + '" target="_blank" class="inline-block px-4 py-2 bg-[#5A9BF5] border-[3px] border-gray-900 text-gray-900 rounded group-hover:-translate-y-px group-hover:-translate-x-px transition-transform relative z-10">Open live app</a></div>';
+            html += '<div class="relative group"><div class="w-full h-full rounded bg-gray-900 translate-y-1 translate-x-1 absolute inset-0"></div>';
+            html += '<button onclick="copyDeployUrl(\'' + prefix + '\')" class="px-4 py-2 bg-[#5A9BF5] border-[3px] border-gray-900 text-gray-900 rounded group-hover:-translate-y-px group-hover:-translate-x-px transition-transform relative z-10">Copy URL</button></div>';
+            html += '</div></div>';
+            resultEl.innerHTML = html;
+        }
+
+        function copyDeployUrl(prefix) {
+            const link = document.querySelector('#' + CSS.escape(prefix + 'deploy-result') + ' a');
+            const button = event.target.closest('button');
+            copyToClipboard(link ? link.href : '', 'URL copied!', button);
+        }
+
+        async function refreshDeployHint(prefix) {
+            prefix = prefix || '';
+            const hintEl = document.getElementById(prefix + 'deploy-config-hint');
+            if (!hintEl) return;
+            try {
+                const res = await fetch('/api/cloud/config');
+                if (!res.ok) throw new Error('config unavailable');
+                const cfg = await res.json();
+                if (cfg.configured) {
+                    hintEl.textContent = 'Target: ' + cfg.registry_host + '/' + cfg.repository
+                        + ' · Region: ' + cfg.region
+                        + (cfg.gcloud_available ? '' : ' · gcloud CLI not detected on server');
+                } else {
+                    hintEl.textContent = 'Cloud deployment needs GCP_PROJECT_ID and gcloud authentication on the server. Local Dockerfile generation works without it — see README.';
+                }
+            } catch (err) {
+                hintEl.textContent = 'Could not check cloud configuration. Local Dockerfile generation is unaffected.';
+            }
+        }
+
+        async function deployToCloud(prefix) {
+            prefix = prefix || '';
+            const btn = document.getElementById(prefix + 'deploy-btn');
+            const progress = document.getElementById(prefix + 'deploy-progress');
+            const statusEl = document.getElementById(prefix + 'deploy-status');
+            const logsEl = document.getElementById(prefix + 'deploy-logs');
+            const resultEl = document.getElementById(prefix + 'deploy-result');
+            const meta = window.__gcResult || {};
+            const dockerfile = dockerfileEditor ? dockerfileEditor.getValue() : (meta.dockerfile || '');
+
+            if (resultEl) { resultEl.classList.add('hidden'); resultEl.innerHTML = ''; }
+            if (logsEl) logsEl.textContent = '';
+            if (progress) progress.classList.remove('hidden');
+            if (statusEl) statusEl.textContent = 'Starting cloud deployment...';
+            if (btn) btn.disabled = true;
+
+            let payload;
+            try {
+                payload = {
+                    repo_url: meta.repo_url || '',
+                    dockerfile: dockerfile,
+                    project_name: meta.project_name || '',
+                    technology_stack: meta.technology_stack || '',
+                    port_recommendations: meta.port_recommendations || [],
+                    service_name: '',
+                    region: '',
+                    session_id: meta.session_id || ''
+                };
+                const res = await fetch('/api/cloud/deploy', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) {
+                    let detail = 'Request failed with status ' + res.status;
+                    try { detail = (await res.json()).detail || detail; } catch (e) {}
+                    throw new Error(detail);
+                }
+                const data = await res.json();
+                connectDeployWebSocket(data.deploy_id, prefix);
+            } catch (err) {
+                if (statusEl) statusEl.textContent = 'Cloud deployment failed';
+                showDeployError(prefix, String((err && err.message) || err));
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        function connectDeployWebSocket(deployId, prefix) {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = protocol + '//' + window.location.host + '/ws/deploy/' + deployId;
+            const statusEl = document.getElementById(prefix + 'deploy-status');
+            const btn = document.getElementById(prefix + 'deploy-btn');
+            const ws = new WebSocket(wsUrl);
+
+            ws.onmessage = function(event) {
+                let data;
+                try { data = JSON.parse(event.data); } catch (e) { return; }
+                if (data.type === 'status') {
+                    if (statusEl) statusEl.textContent = data.content;
+                } else if (data.type === 'deploy_log') {
+                    appendDeployLog(prefix, data.content);
+                } else if (data.type === 'deploy_step') {
+                    const parts = String(data.content || '').split(':');
+                    const action = parts[1] || '';
+                    const step = parts[0] || '';
+                    if (action === 'start') highlightDeployStep(prefix, step);
+                    else if (action === 'done') completeDeployStep(prefix, step);
+                } else if (data.type === 'deploy_complete') {
+                    showDeploySuccess(prefix, data.result || {});
+                    if (btn) btn.disabled = false;
+                    ws.close();
+                } else if (data.type === 'error') {
+                    if (statusEl) statusEl.textContent = 'Cloud deployment failed';
+                    showDeployError(prefix, data.content);
+                    if (btn) btn.disabled = false;
+                    ws.close();
+                }
+            };
+
+            ws.onclose = function(event) {
+                if (btn) btn.disabled = false;
+            };
+
+            ws.onerror = function(error) {
+                if (statusEl) statusEl.textContent = 'Connection error. Please retry.';
+                if (btn) btn.disabled = false;
+            };
+        }
+
         // WebSocket streaming functionality
         {% if streaming %}
         const sessionId = "{{ session_id }}";
@@ -700,6 +936,10 @@
         
         function showResults(result) {
             completeStep('generate');
+
+            // Remember the result for cloud deployment (deploys the
+            // exact Dockerfile shown in the editor).
+            window.__gcResult = result;
             
             // Hide streaming container
             document.getElementById('streaming-container').style.display = 'none';
@@ -710,6 +950,8 @@
             
             // Populate results with Monaco editors
             resultsContainer.innerHTML = generateResultsHTML(result);
+
+            refreshDeployHint('');
             
             // Initialize Monaco editors for streaming results
             setTimeout(() => {
@@ -813,6 +1055,9 @@
                 
                 html += '</div>';
             }
+
+            // Cloud deployment (same visual language as the rest of the page)
+            html += generateDeployHTML('');
 
             html += '</div>';
             return html;

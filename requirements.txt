@@ -1,4 +1,6 @@
 openai-agents
+openai
+pydantic
 python-dotenv 
 gitingest
 fastapi
