@@ -14,19 +14,32 @@ The classic GitContainer experience is fully preserved: paste a GitHub URL, get 
 
 Gitcontainer is an AI-powered web application that automatically generates production-ready Dockerfiles by analyzing GitHub repositories. Simply paste a GitHub URL and get a tailored Dockerfile with intelligent base image selection, dependency management, and Docker best practices.
 
-## 🌟 Quick Access
+## 🌟 Quick Access (local)
 
-Simply replace `github.com` with `gitcontainer.com` in any GitHub repository URL to instantly access the Dockerfile generation page for that repository.
+This project runs locally — there is no public SaaS. Start it with
+`python app.py` and open `http://localhost:8000`.
 
-For example:
-```
-https://github.com/username/repo  →  https://gitcontainer.com/username/repo
-```
+The original upstream demo mapped `github.com → gitcontainer.com`; this
+project preserves that idea locally: opening
+`http://localhost:8000/username/repository` pre-fills the form with
+`https://github.com/username/repository` so you can generate a Dockerfile
+for it immediately.
+
+## 🏗️ Architectural boundary
+
+Be clear about the two applications involved:
+
+- `http://localhost:8000` = **GitContainer control interface** (this repo —
+  runs on your machine, never deployed anywhere by this project).
+- `https://....run.app` = **your deployed target application** (the GitHub
+  project you analyzed, Dockerized via Cloud Mode and running on Cloud Run).
+
+Cloud Run hosts the *generated user application*, not the GitContainer UI.
 
 ## ✨ Features
 
 - **🔄 Instant URL Access**: Just replace 'github.com' with 'gitcontainer.com' in any GitHub URL
-- **🤖 AI-Powered Analysis**: Uses OpenAI GPT-4 to analyze repository structure and generate intelligent Dockerfiles
+- **🤖 AI-Powered Analysis**: Uses OpenAI (`gpt-4o-mini`) to analyze repository structure and generate intelligent Dockerfiles
 - **⚡ Real-time Streaming**: Watch the AI generate your Dockerfile in real-time with WebSocket streaming
 - **🎯 Smart Detection**: Automatically detects technology stacks (Python, Node.js, Java, Go, etc.)
 - **🔧 Production-Ready**: Generates Dockerfiles following best practices with proper security, multi-stage builds, and optimization
@@ -176,10 +189,10 @@ with `--port <detected>` + `PORT=<detected>` (see Port handling).
 
 ## 🛠️ How It Works
 
-1. **URL Processing**: Access any repository by replacing 'github.com' with 'gitcontainer.com' in the URL
-2. **Repository Cloning**: Gitcontainer clones the GitHub repository locally using Git
+1. **URL Processing**: Paste any GitHub URL (or open `http://localhost:8000/username/repo` to pre-fill it)
+2. **Repository Cloning**: Gitcontainer clones the GitHub repository locally using Git (no shell interpolation; owner/repo validated)
 3. **Code Analysis**: Uses [gitingest](https://github.com/cyclotruc/gitingest) to analyze the repository structure and extract relevant information
-4. **AI Generation**: Sends the analysis to OpenAI GPT-4 with specialized prompts for Dockerfile generation
+4. **AI Generation**: Sends the analysis to OpenAI (`gpt-4o-mini`) with specialized prompts for Dockerfile generation
 5. **Smart Optimization**: The AI considers:
    - Technology stack detection
    - Dependency management
