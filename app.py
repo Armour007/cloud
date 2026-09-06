@@ -116,16 +116,26 @@ async def home(request: Request):
     })
 
 
+def _ai_status_safe() -> Dict[str, Any]:
+    """Secret-free AI provider status (provider/model names only, never keys)."""
+    try:
+        from tools.ai_providers import get_ai_status
+
+        return dict(get_ai_status())
+    except Exception:
+        return {"provider": "openrouter", "model": "", "configured": False}
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint (registered before the catch-all routes)."""
-    return {"status": "healthy", "cloud": _cloud_status_safe()}
+    return {"status": "healthy", "cloud": _cloud_status_safe(), "ai": _ai_status_safe()}
 
 
 @app.get("/api/cloud/config")
 async def cloud_config():
     """Secret-free cloud configuration status for the deployment UI."""
-    return _cloud_status_safe()
+    return {**_cloud_status_safe(), "ai": _ai_status_safe()}
 
 
 @app.post("/api/cloud/deploy")

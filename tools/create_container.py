@@ -1,13 +1,25 @@
 import asyncio
-import os
 import json
 from typing import Dict, Any, Optional, Union
-from openai import AsyncOpenAI
 from dotenv import load_dotenv
 import re
 
+from .ai_providers import (
+    build_dockerfile_prompt,
+    generate_dockerfile_text,
+    get_ai_config,
+)
+
 # Load environment variables
 load_dotenv()
+
+
+def _safe_print(text: str, **kwargs: Any) -> None:
+    """Print that never crashes on non-UTF-8 Windows consoles (cp1252, ...)."""
+    try:
+        print(text, **kwargs)
+    except UnicodeEncodeError:
+        print(text.encode("ascii", errors="replace").decode("ascii"), **kwargs)
 
 
 async def create_container_tool(
@@ -20,113 +32,56 @@ async def create_container_tool(
     websocket: Optional[Any] = None  # WebSocket connection for streaming
 ) -> Dict[str, Any]:
     """
-    Generate a Dockerfile using OpenAI API based on gitingest context.
-    
-    Args:
-        gitingest_summary (str): Summary from gitingest analysis
-        gitingest_tree (str): Directory tree from gitingest
-        gitingest_content (str): Full content from gitingest
-        project_name (str, optional): Name of the project for the container
-        additional_instructions (str, optional): Additional instructions for the Dockerfile generation
-        max_context_chars (int): Maximum characters to send in context
-        websocket (Any, optional): WebSocket connection for streaming
-        
-    Returns:
-        Dict[str, Any]: Dictionary containing the generated Dockerfile and metadata
+    Generate a Dockerfile using the configured AI provider based on gitingest context.
+
+    The provider is selected via AI_PROVIDER (openrouter/gemini/groq/openai,
+    default openrouter). The prompt, JSON contract, WebSocket streaming
+    protocol and return shape are identical for every provider.
     """
     try:
-        # Initialize OpenAI client
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY not found in environment variables")
-        
-        client = AsyncOpenAI(api_key=api_key)
-        
+        # Resolve the AI provider (default: openrouter free-tier models).
+        # Raises ValueError for unknown providers; missing keys raise
+        # provider-specific errors inside generate_dockerfile_text.
+        ai_config = get_ai_config()
+
         # Truncate content if it exceeds max context to avoid hitting limits
         truncated_content = gitingest_content
         if len(gitingest_content) > max_context_chars:
             truncated_content = gitingest_content[:max_context_chars] + "\n\n... [Content truncated due to length] ..."
-        
-        # Create the prompt for Dockerfile generation
-        additional_instructions_section = ""
-        if additional_instructions and additional_instructions.strip():
-            additional_instructions_section = f"\n\nADDITIONAL INSTRUCTIONS:\n{additional_instructions.strip()}"
-        
-        prompt = f"""Based on the following repository analysis, generate a comprehensive and production-ready Dockerfile.
 
-PROJECT SUMMARY:
-{gitingest_summary}
-
-DIRECTORY STRUCTURE:
-{gitingest_tree}
-
-SOURCE CODE CONTEXT:
-{truncated_content}{additional_instructions_section}
-
-Please generate a Dockerfile that:
-1. Uses appropriate base images for the detected technology stack
-2. Includes proper dependency management
-3. Sets up the correct working directory structure
-4. Exposes necessary ports
-5. Includes health checks where appropriate
-6. Follows Docker best practices (multi-stage builds if beneficial, minimal layers, etc.)
-7. Handles environment variables and configuration
-8. Sets up proper user permissions for security
-
-If you detect multiple services or a complex architecture, provide a main Dockerfile and suggest docker-compose.yml structure.
-
-IMPORTANT: Respond ONLY with a valid JSON object. Do not include any markdown formatting, explanations, or code blocks. The response must be parseable JSON.
-
-Required JSON format:
-{{
-  "dockerfile": "FROM python:3.9-slim\\nWORKDIR /app\\nCOPY . .\\nRUN pip install -r requirements.txt\\nEXPOSE 8000\\nCMD [\\"python\\", \\"app.py\\"]",
-  "base_image_reasoning": "Explanation of why you chose the base image",
-  "technology_stack": "Detected technologies and frameworks",
-  "port_recommendations": ["8000", "80"],
-  "additional_notes": "Any important setup or deployment notes",
-  "docker_compose_suggestion": "Optional docker-compose.yml content if multiple services detected"
-}}"""
-
-        # Make API call to generate Dockerfile with streaming
-        websocket_active = await _emit_ws_message(websocket, "status", "🐳 Generating Dockerfile...")
-        if websocket_active:
-            print("🐳 Generating Dockerfile... (streaming response)\n")
-        
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",  # Using GPT-4 for better code generation
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert DevOps engineer specializing in containerization. Generate production-ready Dockerfiles based on repository analysis. ALWAYS respond with valid JSON only - no markdown, no explanations, no code blocks. Just pure JSON that can be parsed directly."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            temperature=0.3,  # Lower temperature for more consistent output
-            max_tokens=2000,   # Sufficient for Dockerfile generation
-            stream=True       # Enable streaming
+        # Shared prompt — identical for every provider.
+        prompt = build_dockerfile_prompt(
+            gitingest_summary, gitingest_tree, truncated_content, additional_instructions
         )
+
+        # Generate via the selected provider with streaming
+        websocket_active = await _emit_ws_message(
+            websocket, "status", f"🐳 Generating Dockerfile with {ai_config.provider}..."
+        )
+        if websocket_active:
+            _safe_print(f"🐳 Generating Dockerfile with {ai_config.provider}... (streaming response)\n")
         
-        # Collect the streaming response and print in real-time
+        # Collect the provider's response with streaming.
+        # The provider emits text via the callback (prints + WS chunks);
+        # the full text comes back in the result — never counted twice.
         dockerfile_response = ""
         if websocket_active:
             websocket_active = await _emit_ws_message(websocket, "stream_start", "Starting generation...")
-        print("📝 Response:")
-        print("-" * 50)
-        
-        async for chunk in response:
-            if chunk.choices[0].delta.content is not None:
-                content = chunk.choices[0].delta.content
-                print(content, end="", flush=True)
-                dockerfile_response += content
-                # Only emit chunks if WebSocket is still active
-                if websocket_active:
-                    websocket_active = await _emit_ws_message(websocket, "chunk", content)
-        
-        print("\n" + "-" * 50)
-        print("✅ Generation complete!\n")
+        _safe_print("📝 Response:")
+        _safe_print("-" * 50)
+
+        async def _on_provider_chunk(text: str) -> None:
+            nonlocal websocket_active
+            _safe_print(text, end="", flush=True)
+            # Only emit chunks if WebSocket is still active
+            if websocket_active:
+                websocket_active = await _emit_ws_message(websocket, "chunk", text)
+
+        generated = await generate_dockerfile_text(prompt, ai_config, _on_provider_chunk)
+        dockerfile_response = generated["text"]
+
+        _safe_print("\n" + "-" * 50)
+        _safe_print("✅ Generation complete!\n")
         if websocket_active:
             await _emit_ws_message(websocket, "status", "✅ Generation complete!")
         
@@ -190,6 +145,8 @@ Required JSON format:
             "additional_notes": dockerfile_data.get("additional_notes", ""),
             "docker_compose_suggestion": dockerfile_data.get("docker_compose_suggestion"),
             "project_name": project_name or "generated-project",
+            "ai_provider": generated.get("provider", ai_config.provider),
+            "ai_model": generated.get("model", ai_config.model),
             "context_truncated": len(gitingest_content) > max_context_chars,
             "original_content_length": len(gitingest_content),
             "used_content_length": len(truncated_content)

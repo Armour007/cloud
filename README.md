@@ -2,44 +2,81 @@
 
 # Gitcontainer Cloud 🐳☁️
 
-**AI-Powered Cloud-Native Application Containerization & Deployment.**
+Turn a GitHub repository into a live containerized application.
 
-**Turn any GitHub repository into a production-ready Docker container — and deploy it to Google Cloud Run with a live HTTPS URL — with AI-powered Dockerfile generation.**
-
-The classic GitContainer experience is fully preserved: paste a GitHub URL, get a tailored Dockerfile. *Cloud deployment is an optional extension*: after the Dockerfile is generated, one action builds the image, pushes it to Google Artifact Registry and deploys it to Cloud Run.
+```text
+GitHub → AI → Docker → Artifact Registry → Cloud Run → LIVE
+```
 
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.68+-00a393.svg)](https://fastapi.tiangolo.com/)
 
-Gitcontainer is an AI-powered web application that automatically generates production-ready Dockerfiles by analyzing GitHub repositories. Simply paste a GitHub URL and get a tailored Dockerfile with intelligent base image selection, dependency management, and Docker best practices.
+## Quick Start
 
-## 🌟 Quick Access (local)
+### Windows
 
-This project runs locally — there is no public SaaS. Start it with
-`python app.py` and open `http://localhost:8000`.
+```powershell
+git clone https://github.com/Armour007/cloud.git
+cd cloud
+.\setup.ps1
+.\start.ps1
+```
 
-The original upstream demo mapped `github.com → gitcontainer.com`; this
-project preserves that idea locally: opening
-`http://localhost:8000/username/repository` pre-fills the form with
-`https://github.com/username/repository` so you can generate a Dockerfile
-for it immediately.
+Then open:
+
+[http://localhost:8000](http://localhost:8000)
+
+### macOS / Linux
+
+```bash
+git clone https://github.com/Armour007/cloud.git
+cd cloud
+chmod +x setup.sh start.sh
+./setup.sh
+./start.sh
+```
+
+Then open:
+
+[http://localhost:8000](http://localhost:8000)
+
+That's the primary setup path. `setup` checks your tools, creates the
+environment, and configures your AI provider; `start` runs the app.
+Prefer manual setup? See [Advanced Setup](#advanced-setup).
+
+## User workflow
+
+One continuous pipeline — paste a URL, get a live app:
+
+1. Open GitContainer at `http://localhost:8000`.
+2. Paste a public GitHub repository URL.
+3. Click Analyze — the repository is cloned and analyzed.
+4. AI generates a Dockerfile for the detected stack.
+5. Review the Dockerfile in the editor.
+6. Build the container image.
+7. Push the image to Artifact Registry.
+8. Deploy to Cloud Run (click **Deploy to Cloud Run**).
+9. Watch Build → Push → Deploy progress.
+10. Open the generated live `https://....run.app` URL. 🟢
 
 ## 🏗️ Architectural boundary
 
-Be clear about the two applications involved:
+Two applications are involved — don't confuse them:
 
 - `http://localhost:8000` = **GitContainer control interface** (this repo —
   runs on your machine, never deployed anywhere by this project).
 - `https://....run.app` = **your deployed target application** (the GitHub
-  project you analyzed, Dockerized via Cloud Mode and running on Cloud Run).
+  project you analyzed, Dockerized and running on Cloud Run).
 
 Cloud Run hosts the *generated user application*, not the GitContainer UI.
+(Local execution and cloud deployment are implementation stages of the one
+workflow above — there is no separate product to learn.)
 
 ## ✨ Features
 
-- **🔄 Instant URL Access**: Just replace 'github.com' with 'gitcontainer.com' in any GitHub URL
-- **🤖 AI-Powered Analysis**: Uses OpenAI (`gpt-4o-mini`) to analyze repository structure and generate intelligent Dockerfiles
+- **🔄 Instant URL Access**: Open `http://localhost:8000/username/repo` to pre-fill any GitHub repository
+- **🤖 AI-Powered Analysis**: Free-tier AI providers (OpenRouter default, Gemini/Groq supported) analyze structure and generate intelligent Dockerfiles
 - **⚡ Real-time Streaming**: Watch the AI generate your Dockerfile in real-time with WebSocket streaming
 - **🎯 Smart Detection**: Automatically detects technology stacks (Python, Node.js, Java, Go, etc.)
 - **🔧 Production-Ready**: Generates Dockerfiles following best practices with proper security, multi-stage builds, and optimization
@@ -73,126 +110,64 @@ Public HTTPS URL (real service URL returned by Cloud Run)
 
 Deliberately simple: **Cloud Run instead of GKE** — no Kubernetes, Helm, Terraform, service mesh or background workers. The cloud layer lives in `cloud/` and never touches the analysis/generation core in `tools/`.
 
-## 🚀 Quick Start
+## 🤖 AI providers (free-tier support)
 
-### Prerequisites
+No OpenAI purchase required. Pick one during `setup` (OpenRouter preselected):
 
-**Required for Local Mode** (analyze → generate Dockerfile):
+| Provider | Key | Default model | Notes |
+|---|---|---|---|
+| OpenRouter (default) | `OPENROUTER_API_KEY` | `openrouter/free` | Auto-selects a currently available free model; key from https://openrouter.ai/keys |
+| Gemini | `GEMINI_API_KEY` | `gemini-2.0-flash` | Google free tier; key from https://aistudio.google.com/apikey |
+| Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Fast inference; key from https://console.groq.com/keys |
+| OpenAI (optional) | `OPENAI_API_KEY` | `gpt-4o-mini` | Legacy, paid — never required |
 
-- Python 3.9 or higher
-- Git
-- OpenAI API key
+Only the selected provider needs a key (`AI_PROVIDER=openrouter` by default;
+every model is overridable via `*_MODEL`). Free-model IDs and quotas change
+over time — this is free-tier/free-model support, not unlimited free AI. If a
+model disappears you'll get a clear error naming it; set a current ID and retry.
 
-**Additionally required for Cloud Mode** (build → push → deploy):
+## ☁️ Deploying to Cloud Run (prerequisites)
 
-- Docker Desktop (running — builds execute locally via the Docker CLI)
-- Google Cloud CLI `gcloud`
-- Authenticated Google account (`gcloud auth login`)
-- GCP project with **billing enabled** (Cloud Run requires it)
-- IAM permissions: `roles/run.admin` + `roles/artifactregistry.writer`
-  (Editor/Owner on a demo project also works)
+Dockerfile generation works without any of this. The **Deploy to Cloud Run**
+button additionally needs (setup checks these and explains what's missing):
 
-### Installation
+1. **Docker Desktop** running (builds execute locally): https://www.docker.com/products/docker-desktop/
+2. **Google Cloud CLI**: https://cloud.google.com/sdk/docs/install
+3. **Authentication**: `gcloud auth login` (also `gcloud auth application-default login`)
+4. **GCP project** with **billing enabled** (Cloud Run requires it):
+   `gcloud projects list` → `gcloud config set project PROJECT_ID`
+5. **Required APIs**: `gcloud services enable run.googleapis.com artifactregistry.googleapis.com`
+6. **Permissions**: `roles/run.admin` + `roles/artifactregistry.writer` (Editor/Owner on a demo project works)
+7. **Artifact Registry repo** (Docker format):
+   `gcloud artifacts repositories create gitcontainer-images --repository-format=docker --location=asia-south1`
+8. **`.env`**: `GCP_PROJECT_ID`, `GCP_REGION` (default `asia-south1`),
+   `GCP_ARTIFACT_REGISTRY` (default `gitcontainer-images`)
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/Armour007/cloud.git
-   cd cloud
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Set up environment variables:**
-   ```bash
-   # Copy the template and fill in your keys
-   cp .env.example .env
-   # (Windows cmd.exe: copy .env.example .env)
-   # Required for Dockerfile generation:
-   #   OPENAI_API_KEY=your_openai_api_key_here
-   # Optional, only for Cloud Run deployment:
-   #   GCP_PROJECT_ID=your-gcp-project-id
-   #   GCP_REGION=asia-south1
-   #   GCP_ARTIFACT_REGISTRY=gitcontainer-images
-   ```
-
-4. **Run the application:**
-   ```bash
-   python app.py
-   ```
-
-5. **Open your browser:**
-   Navigate to `http://localhost:8000`
-
-## ☁️ Google Cloud Setup (only for Cloud Run deployment)
-
-Local Dockerfile generation works **without** any of this. To enable
-**Deploy to Cloud Run**:
-
-1. **Create/select a GCP project** at https://console.cloud.google.com/
-   and note the project ID.
-2. **Install the Google Cloud CLI**: https://cloud.google.com/sdk/docs/install
-3. **Authenticate** (use the same account that owns the project):
-   ```bash
-   gcloud auth login
-   gcloud auth application-default login
-   gcloud config set project YOUR_PROJECT_ID
-   ```
-4. **Enable required APIs**:
-   ```bash
-   gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com
-   ```
-5. **Create the Artifact Registry repository** (Docker format):
-   ```bash
-   gcloud artifacts repositories create gitcontainer-images \
-     --repository-format=docker --location=asia-south1
-   ```
-   Use the same region you configure in `GCP_REGION`.
-6. **Configure environment variables** in `.env`:
-   ```env
-   GCP_PROJECT_ID=your-gcp-project-id
-   GCP_REGION=asia-south1
-   GCP_ARTIFACT_REGISTRY=gitcontainer-images
-   ```
-   Never commit `.env` or service-account keys. The app uses your local
-   `gcloud` credentials — no keys are stored in the repo.
-7. **Run the app and deploy**: generate a Dockerfile as usual, then click
-   **Deploy to Cloud Run**. Watch build → push → deploy progress and open
-   the live `https://....run.app` URL.
-
-Required IAM on your account: `roles/run.admin`,
-`roles/artifactregistry.writer` (or broader Editor/Owner for a demo
-project).
-
-## 🖥️ Local Mode (no GCP needed)
-
-1. Run `python app.py`, open `http://localhost:8000`
-2. Paste a GitHub URL (e.g. `https://github.com/cyclotruc/gitingest`)
-3. Click **Generate Dockerfile**, watch Clone → Analyze → Generate
-4. Review the Dockerfile in the editor, copy it if needed
-
-Nothing GCP-related is required or contacted in this mode.
-
-## ☁️ Cloud Mode (deploy to Cloud Run)
-
-1. Complete the Google Cloud Setup above (one time per machine/project)
-2. Generate a Dockerfile as in Local Mode
-3. Click **Deploy to Cloud Run** under the result
-4. Watch Build → Push → Deploy progress in place
-5. Open the live `https://....run.app` URL when it appears
-
+Never commit `.env` or keys — the app uses your local `gcloud` credentials.
 The deployment builds the exact Dockerfile shown in the editor, tags it
 `REGION-docker.pkg.dev/PROJECT/REPO/IMAGE:latest`, pushes it, and deploys
 with `--port <detected>` + `PORT=<detected>` (see Port handling).
+
+## <a id="advanced-setup"></a>🛠️ Advanced Setup
+
+Prefer manual setup over the scripts?
+
+```bash
+git clone https://github.com/Armour007/cloud.git
+cd cloud
+python -m venv .venv
+# Windows: .venv\Scripts\activate   macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # then set AI_PROVIDER + your provider key
+python app.py          # open http://localhost:8000
+```
 
 ## 🛠️ How It Works
 
 1. **URL Processing**: Paste any GitHub URL (or open `http://localhost:8000/username/repo` to pre-fill it)
 2. **Repository Cloning**: Gitcontainer clones the GitHub repository locally using Git (no shell interpolation; owner/repo validated)
 3. **Code Analysis**: Uses [gitingest](https://github.com/cyclotruc/gitingest) to analyze the repository structure and extract relevant information
-4. **AI Generation**: Sends the analysis to OpenAI (`gpt-4o-mini`) with specialized prompts for Dockerfile generation
+4. **AI Generation**: Sends the analysis to the configured provider (OpenRouter/Gemini/Groq) with specialized prompts for Dockerfile generation
 5. **Smart Optimization**: The AI considers:
    - Technology stack detection
    - Dependency management
@@ -207,15 +182,18 @@ with `--port <detected>` + `PORT=<detected>` (see Port handling).
 ```
 cloud/
 ├── app.py                 # Main FastAPI application (+ cloud API/WS routes)
-├── requirements.txt       # Python dependencies (unchanged — cloud uses CLI tools)
-├── .env                  # Environment variables (create this, never commit)
+├── setup.ps1 / start.ps1  # Windows one-command setup + start
+├── setup.sh / start.sh    # macOS/Linux one-command setup + start
+├── requirements.txt       # Python dependencies (no new packages for AI providers)
+├── .env                  # Environment variables (created by setup, never commit)
 ├── .env.example          # Template for all supported variables
 ├── static/               # Static assets (icons, CSS)
 ├── templates/
 │   └── index.jinja       # Main HTML template (UI preserved; deploy card appended)
-├── tools/                # Core functionality modules (untouched)
+├── tools/                # Core functionality modules
 │   ├── __init__.py
-│   ├── create_container.py  # AI Dockerfile generation
+│   ├── ai_providers.py      # Provider abstraction (openrouter/gemini/groq/openai)
+│   ├── create_container.py  # AI Dockerfile generation (provider-agnostic contract)
 │   ├── git_operations.py    # GitHub repository cloning
 │   └── gitingest.py        # Repository analysis
 └── cloud/                # NEW: isolated Cloud Run deployment layer
@@ -233,7 +211,14 @@ cloud/
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `OPENAI_API_KEY` | Your OpenAI API key | Yes |
+| `AI_PROVIDER` | `openrouter` (default) \| `gemini` \| `groq` \| `openai` | No |
+| `OPENROUTER_API_KEY` | OpenRouter key (free models available) | Only if `AI_PROVIDER=openrouter` |
+| `OPENROUTER_MODEL` | Model ID (default: `openrouter/free`) | No |
+| `GEMINI_API_KEY` | Google AI Studio key | Only if `AI_PROVIDER=gemini` |
+| `GEMINI_MODEL` | Model ID (default: `gemini-2.0-flash`) | No |
+| `GROQ_API_KEY` | GroqCloud key | Only if `AI_PROVIDER=groq` |
+| `GROQ_MODEL` | Model ID (default: `llama-3.3-70b-versatile`) | No |
+| `OPENAI_API_KEY` | OpenAI key (optional legacy provider) | Only if `AI_PROVIDER=openai` |
 | `GCP_PROJECT_ID` | GCP project for Artifact Registry + Cloud Run | Only for cloud deploy |
 | `GCP_REGION` | GCP region (default: `asia-south1`) | No |
 | `GCP_ARTIFACT_REGISTRY` | Artifact Registry repo name (default: `gitcontainer-images`) | No |
@@ -314,12 +299,15 @@ Use the "Additional instructions" feature to customize generation:
   folder any time to reclaim disk space.
 - No fake deployments: without valid GCP setup the UI reports the real
   error and never shows a URL.
+- Free-tier AI models rotate and quotas change; models are configurable via
+  `*_MODEL` variables and failures name the exact model to replace.
 
 ## 🆘 Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `OPENAI_API_KEY not found` | Create `.env` from `.env.example` and set `OPENAI_API_KEY` |
+| `OPENAI_API_KEY` not configured | Only needed when `AI_PROVIDER=openai` — otherwise configure your selected provider's key |
+| `OPENROUTER_API_KEY` / `GEMINI_API_KEY` / `GROQ_API_KEY` not configured | `setup` asks for the selected provider's key; add it to `.env` |
 | `Docker daemon is not reachable` | Start Docker Desktop and wait until it is running |
 | `Docker executable not found` | Install Docker Desktop and ensure `docker` is on PATH |
 | `gcloud is not installed` | Install from https://cloud.google.com/sdk/docs/install, restart terminal |
